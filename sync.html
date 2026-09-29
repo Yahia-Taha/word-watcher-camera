@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<title>مراقب الكلمات</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁</text></svg>">
+<style>
+  :root{
+    --bg:#101418; --panel:#1a2027; --line:#2b333d; --text:#e8edf2; --dim:#8a96a3;
+    --gold:#f5b642; --hit:#3ddc84; --warn:#ff6b5a;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *,*::before,*::after{box-sizing:inherit}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:"Segoe UI",Tahoma,"Noto Sans Arabic",system-ui,sans-serif;font-size:16px}
+  main{max-width:720px;margin:0 auto;padding:12px}
+  h1{font-size:1.25rem;margin:4px 0 12px;display:flex;align-items:center;gap:8px}
+  .status{font-size:.8rem;padding:3px 10px;border-radius:99px;background:var(--line);color:var(--dim);font-weight:500}
+  .status.on{background:#173d2a;color:var(--hit)}
+  .stage{position:relative;background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;touch-action:none;user-select:none}
+  video{width:100%;height:100%;object-fit:contain;display:block}
+  .roi{position:absolute;border:2px solid var(--gold);box-shadow:0 0 0 9999px rgba(0,0,0,.45);pointer-events:none}
+  .stage.flash{outline:6px solid var(--hit);outline-offset:-6px}
+  .hint{position:absolute;inset:auto 0 8px;text-align:center;font-size:.8rem;color:#fff;opacity:.8;pointer-events:none}
+  .row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
+  button{font:inherit;border:0;border-radius:8px;padding:12px 16px;background:var(--panel);color:var(--text);border:1px solid var(--line);cursor:pointer}
+  button.primary{background:var(--gold);color:#1a1200;border-color:var(--gold);font-weight:700;flex:1}
+  button.stop{background:var(--warn);border-color:var(--warn);color:#fff}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin:10px 0}
+  section h2{font-size:1rem;margin:0 0 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .chip{direction:ltr;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:6px 8px 6px 12px;display:flex;align-items:center;gap:6px}
+  .chip.hit{border-color:var(--hit);color:var(--hit)}
+  .chip button{padding:0 6px;border:0;background:none;color:var(--dim);font-size:1.1rem;line-height:1}
+  input[type=text]{direction:ltr;flex:1;min-width:0;font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+  label{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;font-size:.92rem}
+  input[type=range]{width:45%}
+  select{font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px}
+  .log{direction:ltr;font-size:.85rem;max-height:160px;overflow:auto}
+  .log div{padding:4px 0;border-bottom:1px solid var(--line)}
+  .log time{color:var(--dim);margin-right:8px}
+  details summary{cursor:pointer;color:var(--dim);font-size:.9rem}
+  .debug{margin-top:8px;overflow-x:auto}
+  .debug canvas{max-width:100%;background:#fff;display:block;border-radius:4px}
+  .debug pre{direction:ltr;white-space:pre-wrap;font-size:.75rem;color:var(--dim);margin:6px 0 0}
+  .err{color:var(--warn);font-size:.9rem;margin:6px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>مراقب الكلمات <span id="status" class="status">متوقف</span></h1>
+
+  <div id="stage" class="stage">
+    <video id="video" playsinline muted></video>
+    <div id="roi" class="roi"></div>
+    <div class="hint" id="hint">اسحب بإصبعك على الصورة لتحديد مكان ظهور الرسائل</div>
+  </div>
+  <div id="err" class="err" hidden></div>
+
+  <div class="row">
+    <button id="startBtn" class="primary">ابدأ المراقبة</button>
+    <button id="testBtn">جرّب التنبيه</button>
+  </div>
+
+  <section>
+    <h2>الكلمات المراقبة</h2>
+    <div id="syncInfo" style="font-size:.82rem;color:var(--dim);margin-bottom:8px"></div>
+    <div id="chips" class="chips"></div>
+    <div class="row" id="addRow" style="margin:0">
+      <input id="newWord" type="text" placeholder="Legendary" autocomplete="off" autocapitalize="off">
+      <button id="addBtn">إضافة</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>سجل التنبيهات</h2>
+    <div id="log" class="log"><div id="logEmpty" style="color:var(--dim)">لسه مفيش تنبيهات</div></div>
+  </section>
+
+  <section>
+    <h2>الإعدادات</h2>
+    <label>المصدر
+      <select id="source"><option value="camera">كاميرا التلفون</option><option value="screen">مشاركة الشاشة (كمبيوتر)</option></select>
+    </label>
+    <label>نطق الكلمة بصوت <input id="speak" type="checkbox" checked></label>
+    <label>اهتزاز <input id="vibrate" type="checkbox" checked></label>
+    <label>التأكيد على لقطتين قبل التنبيه (أقل إنذارات خاطئة) <input id="confirm" type="checkbox"></label>
+    <label>مهلة تكرار نفس الكلمة: <span id="cdVal"></span> ث <input id="cooldown" type="range" min="3" max="30" step="1"></label>
+    <label>درجة فصل النص عن الخلفية: <span id="thVal"></span> <input id="thresh" type="range" min="60" max="95" step="1"></label>
+    <details>
+      <summary>عرض ما تقرأه الأداة (للضبط)</summary>
+      <div class="debug"><canvas id="dbg"></canvas><pre id="ocrText"></pre></div>
+    </details>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), stage = $('stage'), roiEl = $('roi');
+
+  // ---------- settings ----------
+  const defaults = {
+    words: ['Legendary', 'Epic', 'Beskar', 'Stellar Droid'],
+    roi: { x: 0.02, y: 0.40, w: 0.96, h: 0.22 },
+    speak: true, vibrate: true, confirm: false, cooldown: 10, thresh: 80, source: 'camera'
+  };
+  let S = { ...defaults };
+  try { S = { ...defaults, ...JSON.parse(localStorage.getItem('ww-settings-sync') || '{}') }; } catch (e) {}
+  const save = () => { try { localStorage.setItem('ww-settings-sync', JSON.stringify(S)); } catch (e) {} };
+
+  // ---------- keywords UI ----------
+  const chipsEl = $('chips');
+  function renderChips(hitWord) {
+    chipsEl.innerHTML = '';
+    S.words.forEach((w, i) => {
+      const c = document.createElement('span');
+      c.className = 'chip' + (w === hitWord ? ' hit' : '');
+      c.textContent = w;
+      const x = document.createElement('button');
+      x.textContent = '×'; x.setAttribute('aria-label', 'حذف ' + w);
+      x.onclick = () => { S.words.splice(i, 1); save(); renderChips(); };
+      if (!remoteActive) c.appendChild(x); chipsEl.appendChild(c);
+    });
+  }
+  function addWord() {
+    const v = $('newWord').value.trim();
+    if (v && !S.words.some(w => w.toLowerCase() === v.toLowerCase())) { S.words.push(v); save(); renderChips(); }
+    $('newWord').value = '';
+  }
+  $('addBtn').onclick = addWord;
+  $('newWord').addEventListener('keydown', e => { if (e.key === 'Enter') addWord(); });
+
+  // ---------- settings UI ----------
+  const bind = (id, key, isNum) => {
+    const el = $(id);
+    if (el.type === 'checkbox') el.checked = S[key]; else el.value = S[key];
+    el.addEventListener('input', () => { S[key] = el.type === 'checkbox' ? el.checked : (isNum ? +el.value : el.value); save(); refreshLabels(); });
+  };
+  bind('speak', 'speak'); bind('vibrate', 'vibrate'); bind('confirm', 'confirm');
+  bind('cooldown', 'cooldown', true); bind('thresh', 'thresh', true); bind('source', 'source');
+  function refreshLabels() { $('cdVal').textContent = S.cooldown; $('thVal').textContent = S.thresh; }
+  refreshLabels();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    $('source').querySelector('[value=screen]').disabled = true;
+    if (S.source === 'screen') { S.source = 'camera'; $('source').value = 'camera'; }
+  }
+
+  // ---------- ROI selection (in video-content coords) ----------
+  function videoRect() {
+    const r = stage.getBoundingClientRect();
+    const vw = video.videoWidth || 16, vh = video.videoHeight || 9;
+    const s = Math.min(r.width / vw, r.height / vh);
+    const w = vw * s, h = vh * s;
+    return { left: r.left + (r.width - w) / 2, top: r.top + (r.height - h) / 2, w, h, offX: (r.width - w) / 2, offY: (r.height - h) / 2 };
+  }
+  function drawRoi() {
+    const v = videoRect();
+    roiEl.style.left = (v.offX + S.roi.x * v.w) + 'px';
+    roiEl.style.top = (v.offY + S.roi.y * v.h) + 'px';
+    roiEl.style.width = (S.roi.w * v.w) + 'px';
+    roiEl.style.height = (S.roi.h * v.h) + 'px';
+  }
+  let drag = null;
+  const norm = e => { const v = videoRect(); return { x: Math.min(1, Math.max(0, (e.clientX - v.left) / v.w)), y: Math.min(1, Math.max(0, (e.clientY - v.top) / v.h)) }; };
+  stage.addEventListener('pointerdown', e => { drag = norm(e); stage.setPointerCapture(e.pointerId); });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return; const p = norm(e);
+    const r = { x: Math.min(drag.x, p.x), y: Math.min(drag.y, p.y), w: Math.abs(p.x - drag.x), h: Math.abs(p.y - drag.y) };
+    if (r.w > 0.05 && r.h > 0.03) { S.roi = r; drawRoi(); }
+  });
+  stage.addEventListener('pointerup', () => { drag = null; save(); });
+  addEventListener('resize', drawRoi);
+  video.addEventListener('loadedmetadata', drawRoi);
+  drawRoi();
+
+  // ---------- alerts ----------
+  let audioCtx = null;
+  function unlockAudio() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep() {
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [880, 1320, 880].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'square'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + i * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.35, t + i * 0.18 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.18 + 0.16);
+      o.connect(g).connect(audioCtx.destination); o.start(t + i * 0.18); o.stop(t + i * 0.18 + 0.17);
+    });
+  }
+  function alertFor(word) {
+    beep();
+    if (S.vibrate && navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    if (S.speak && 'speechSynthesis' in window) {
+      setTimeout(() => { const u = new SpeechSynthesisUtterance(word); u.lang = 'en-US'; u.rate = 1; speechSynthesis.cancel(); speechSynthesis.speak(u); }, 600);
+    }
+    stage.classList.add('flash'); setTimeout(() => stage.classList.remove('flash'), 1200);
+    renderChips(word); setTimeout(() => renderChips(), 2500);
+    const log = $('log');
+    const empty = $('logEmpty'); if (empty) empty.remove();
+    const d = document.createElement('div');
+    d.innerHTML = `<time>${new Date().toLocaleTimeString()}</time>`; d.append(word);
+    log.prepend(d);
+  }
+  $('testBtn').onclick = () => { unlockAudio(); alertFor(S.words[0] || 'Test'); };
+
+  // ---------- fuzzy matching ----------
+  const clean = s => s.toLowerCase()
+    .replace(/0/g, 'o').replace(/1/g, 'l').replace(/3/g, 'e').replace(/5/g, 's').replace(/8/g, 'b').replace(/\|/g, 'l')
+    .replace(/[^a-z]/g, '');
+  const allowed = n => n <= 4 ? 0 : n <= 7 ? 1 : 2;
+  // best edit distance of pattern against any substring of text (Sellers algorithm)
+  function fuzzyDist(p, t) {
+    const m = p.length; let prev = new Array(m + 1), cur = new Array(m + 1), best = m;
+    for (let i = 0; i <= m; i++) prev[i] = i;
+    for (let j = 1; j <= t.length; j++) {
+      cur[0] = 0;
+      for (let i = 1; i <= m; i++) {
+        cur[i] = Math.min(prev[i] + 1, cur[i - 1] + 1, prev[i - 1] + (p[i - 1] === t[j - 1] ? 0 : 1));
+      }
+      if (cur[m] < best) best = cur[m];
+      [prev, cur] = [cur, prev];
+    }
+    return best;
+  }
+  function findWords(text) {
+    const t = clean(text);
+    return S.words.filter(w => { const p = clean(w); return p && fuzzyDist(p, t) <= allowed(p.length); });
+  }
+
+  // ---------- frame preprocessing ----------
+  const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+  const dbg = $('dbg'), dctx = dbg.getContext('2d');
+  function prepareFrame() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const sx = S.roi.x * vw, sy = S.roi.y * vh, sw = S.roi.w * vw, sh = S.roi.h * vh;
+    let scale = Math.min(1, 1300 / sw); if (sw * scale < 700) scale = 700 / sw;
+    const W = Math.round(sw * scale), H = Math.round(sh * scale);
+    work.width = W; work.height = H;
+    wctx.imageSmoothingEnabled = true; wctx.imageSmoothingQuality = 'high';
+    wctx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
+    const img = wctx.getImageData(0, 0, W, H), d = img.data;
+    // brightest channel: bright coloured letters (rainbow names) become uniformly bright
+    let g = new Uint8ClampedArray(W * H);
+    for (let i = 0, p = 0; p < g.length; i += 4, p++) g[p] = Math.max(d[i], d[i + 1], d[i + 2]);
+    // light 3x3 box blur to suppress screen moiré from filming a TV
+    const b = new Uint8ClampedArray(W * H);
+    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+      const k = y * W + x;
+      b[k] = (g[k - W - 1] + g[k - W] + g[k - W + 1] + g[k - 1] + g[k] + g[k + 1] + g[k + W - 1] + g[k + W] + g[k + W + 1]) / 9;
+    }
+    // percentile threshold -> dark text on white page
+    const hist = new Uint32Array(256); for (let k = 0; k < b.length; k++) hist[b[k]]++;
+    let cut = 0, acc = 0, target = b.length * S.thresh / 100;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= target) { cut = v; break; } }
+    for (let i = 0, p = 0; p < b.length; i += 4, p++) { const v = b[p] > cut ? 0 : 255; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+    wctx.putImageData(img, 0, 0);
+    if ($('ocrText').closest('details').open) { dbg.width = W; dbg.height = H; dctx.drawImage(work, 0, 0); }
+    return work;
+  }
+
+  // ---------- main loop ----------
+  let running = false, stream = null, worker = null, wakeLock = null;
+  const lastAlert = {}, pending = {};
+  function setStatus(t, on) { $('status').textContent = t; $('status').classList.toggle('on', !!on); }
+  function showErr(m) { $('err').hidden = !m; $('err').textContent = m || ''; }
+
+  async function start() {
+    unlockAudio(); showErr('');
+    if (!S.words.length) { showErr('أضف كلمة واحدة على الأقل.'); return; }
+    try {
+      setStatus('فتح الكاميرا…');
+      stream = S.source === 'screen'
+        ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false })
+        : await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      video.srcObject = stream; await video.play();
+      stream.getVideoTracks()[0].addEventListener('ended', stop);
+    } catch (e) {
+      setStatus('متوقف');
+      showErr(location.protocol !== 'https:' && location.hostname !== 'localhost'
+        ? 'الكاميرا تحتاج رابط https. ارفع الملف على GitHub Pages أو Netlify.'
+        : 'تعذر فتح المصدر: ' + (e.message || e.name) + '. تأكد من السماح للمتصفح باستخدام الكاميرا.');
+      return;
+    }
+    try {
+      if (!worker) {
+        setStatus('تحميل محرك القراءة…');
+        worker = await Tesseract.createWorker('eng', 1);
+        await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
+      }
+    } catch (e) { showErr('تعذر تحميل محرك القراءة. تأكد من الاتصال بالإنترنت أول مرة.'); stop(); return; }
+    try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+    running = true; $('hint').hidden = true;
+    $('startBtn').textContent = 'إيقاف'; $('startBtn').classList.add('stop');
+    setStatus('يراقب', true);
+    loop();
+  }
+
+  async function loop() {
+    while (running) {
+      if (video.readyState < 2) { await new Promise(r => setTimeout(r, 200)); continue; }
+      try {
+        const canvas = prepareFrame();
+        const { data } = await worker.recognize(canvas);
+        if (!running) break;
+        if ($('ocrText').closest('details').open) $('ocrText').textContent = data.text.trim();
+        const now = Date.now(), hits = findWords(data.text);
+        for (const w of hits) {
+          if (S.confirm && !(pending[w] && now - pending[w] < 4000)) { pending[w] = now; continue; }
+          if (now - (lastAlert[w] || 0) < S.cooldown * 1000) continue;
+          lastAlert[w] = now; delete pending[w]; alertFor(w);
+        }
+      } catch (e) { console.error(e); await new Promise(r => setTimeout(r, 500)); }
+    }
+  }
+
+  function stop() {
+    running = false;
+    if (stream) stream.getTracks().forEach(t => t.stop()); stream = null;
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    $('startBtn').textContent = 'ابدأ المراقبة'; $('startBtn').classList.remove('stop');
+    $('hint').hidden = false; setStatus('متوقف');
+  }
+  $('startBtn').onclick = () => running ? stop() : start();
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible' && running && 'wakeLock' in navigator) { try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+  });
+
+
+  // ---------- remote keyword sync (keywords.txt in the GitHub repo) ----------
+  // Detect owner/repo from a GitHub Pages URL: https://<owner>.github.io/<repo>/...
+  const gh = (() => {
+    const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
+    const repo = location.pathname.split('/').filter(Boolean)[0];
+    return m && repo ? { owner: m[1], repo } : null;
+  })();
+  let etag = null, remoteActive = false;
+  function setSyncInfo(t) { $('syncInfo').textContent = t; }
+  async function syncWords() {
+    if (!gh) return;
+    const url = `https://api.github.com/repos/${gh.owner}/${gh.repo}/contents/keywords.txt?ref=main`;
+    try {
+      const headers = { Accept: 'application/vnd.github.raw+json' };
+      if (etag) headers['If-None-Match'] = etag;
+      const r = await fetch(url, { headers, cache: 'no-store' });
+      if (r.status === 304) { setSyncInfo('متزامن مع keywords.txt · آخر فحص ' + new Date().toLocaleTimeString()); return; }
+      if (r.status === 404) { remoteActive = false; setSyncInfo('ملف keywords.txt مش موجود في المستودع، القائمة محلية على الجهاز ده.'); return; }
+      if (!r.ok) { setSyncInfo('تعذر فحص keywords.txt (' + r.status + ')، القائمة الحالية شغالة.'); return; }
+      etag = r.headers.get('ETag') || etag;
+      const words = (await r.text()).split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      remoteActive = true;
+      const changed = JSON.stringify(words) !== JSON.stringify(S.words);
+      if (changed) { S.words = words; save(); renderChips(); }
+      setSyncInfo((changed ? 'اتحدثت القائمة من keywords.txt' : 'متزامن مع keywords.txt') + ' · ' + new Date().toLocaleTimeString());
+      $('addRow').hidden = true;
+    } catch (e) { setSyncInfo('مفيش اتصال بـ GitHub، القائمة الحالية شغالة.'); }
+  }
+  syncWords();
+  setInterval(syncWords, 30000);
+
+  renderChips();
+})();
+</script>
+</body>
+</html>
